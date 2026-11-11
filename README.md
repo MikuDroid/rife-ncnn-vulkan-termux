@@ -7,7 +7,7 @@
 - Android 10 may not work.
 - Low-end devices may freeze or take a long time to interpolate.
 - Long videos are not recommended.
-- This branch targets approximately 30 FPS input and outputs approximately 60 FPS with RIFE 2x. It accepts videos selected through Android's picker and always creates an MP4. H.265 is the default size-saving option. CRF is quality-based and does not guarantee a particular file size.
+- This personal-preference branch targets approximately 30 FPS input and outputs approximately 60 FPS with RIFE 2x. It accepts videos selected through Android's picker and always creates an MP4. Choose one of two fixed encoding variants; no CRF prompt is shown. CRF is quality-based and does not guarantee a particular file size.
 
 ## Requirements
 - [Termux](https://github.com/termux/termux-app/releases/download/v0.118.3/termux-app_v0.118.3+github-debug_arm64-v8a.apk)
@@ -20,7 +20,7 @@ Open Termux and run:
 curl -fsSL https://raw.githubusercontent.com/MikuDroid/rife-ncnn-vulkan-termux/copilot/rife-ffmpeg9-size-encoding/install.sh -o "$HOME/rife-install.sh" && bash "$HOME/rife-install.sh"
 ```
 
-Then run `rifevulkan` to select and interpolate a video. The temporary local input copy is removed only after successful processing.
+Then run `rifevulkan` to select and interpolate a video. The installer preserves existing home files and stops instead of overwriting a repo directory with local changes. The temporary input copy is removed only after successful processing.
 
 ## Test
 8x interpolation demo from the original project:

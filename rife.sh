@@ -33,7 +33,7 @@ while true; do
 done
 mv "$TMPFILE" "$INPUT"
 
-# This workflow is intentionally 2x only: approximately 30 FPS in, 60 FPS out.
+# This workflow is fixed at 2x: approximately 30 FPS input to approximately 60 FPS output.
 FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$INPUT")
 [[ "$FPS" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "Could not determine a valid input frame rate: $FPS" >&2; exit 1; }
 NUM=${BASH_REMATCH[1]}
@@ -47,7 +47,7 @@ NEWFPS="$((NUM * 2))/$DEN"
 HAS_AUDIO=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$INPUT")
 
 printf "\nInput: ~%s FPS; output: ~%s FPS (RIFE 2x)\n" "$FPS" "$NEWFPS"
-echo "Output is MP4. CRF controls quality/size, not a hard size limit."
+echo "Output is MP4. Choose an encoding preset:"
 echo "1) H.265, CRF 24, medium — smaller output; requires HEVC playback support [default]"
 echo "2) H.264, CRF 22, slow — broader compatibility; may be larger"
 read -r -p "Encoder [1/2]: " ENCODE_MODE
@@ -57,14 +57,9 @@ case "$ENCODE_MODE" in
   2) VCODEC=libx264; CRF=22; PRESET=slow; EXTRA=() ;;
   *) echo "Invalid encoder choice." >&2; exit 1;;
 esac
-read -r -p "CRF [$CRF] (higher = smaller file/lower quality): " CRF_INPUT || true
-[ -n "$CRF_INPUT" ] && CRF=$CRF_INPUT
-if ! [[ "$CRF" =~ ^[0-9]+$ ]] || (( CRF > 51 )); then
-  echo "CRF must be an integer from 0 to 51." >&2
-  exit 1
-fi
 
 printf "\nOutput: %s\nEncoder: %s -preset %s -crf %s\nAudio: %s\n" "$DEST" "$VCODEC" "$PRESET" "$CRF" "${HAS_AUDIO:-none}"
+echo "CRF is preset by the selected variant; it is quality-based, not a hard size limit."
 
 rm -rf frames tmp out
 mkdir -p frames tmp out

@@ -1,7 +1,8 @@
 #!/data/data/com.termux/files/usr/bin/bash
 
+set -e
+
 termux-setup-storage
-cd "$HOME"
 export DEBIAN_FRONTEND=noninteractive
 
 apt update -y
@@ -10,16 +11,31 @@ apt install -y git termux-api ffmpeg libwebp mesa-vulkan-icd-swrast mesa-vulkan-
 
 REPO_DIR="$HOME/rife-ncnn-vulkan-termux"
 BRANCH="copilot/rife-ffmpeg9-size-encoding"
-if [ -d "$REPO_DIR/.git" ]; then
+REPO_URL="https://github.com/MikuDroid/rife-ncnn-vulkan-termux"
+
+if [ -e "$REPO_DIR" ]; then
+  if [ ! -d "$REPO_DIR/.git" ]; then
+    echo "Refusing to overwrite '$REPO_DIR': it exists but is not a Git repository." >&2
+    echo "Move it aside or choose another location, then rerun the installer. Nothing was deleted." >&2
+    exit 1
+  fi
+  if [ -n "$(git -C "$REPO_DIR" status --porcelain)" ]; then
+    echo "Refusing to update '$REPO_DIR': it contains local changes or untracked files." >&2
+    echo "Back up or commit those files, then rerun. Nothing was deleted." >&2
+    exit 1
+  fi
   git -C "$REPO_DIR" fetch origin "$BRANCH"
-  git -C "$REPO_DIR" checkout "$BRANCH"
+  if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+    git -C "$REPO_DIR" switch "$BRANCH"
+  else
+    git -C "$REPO_DIR" switch --track -c "$BRANCH" "origin/$BRANCH"
+  fi
   git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
 else
-  git clone --branch "$BRANCH" https://github.com/MikuDroid/rife-ncnn-vulkan-termux "$REPO_DIR"
+  git clone --branch "$BRANCH" "$REPO_URL" "$REPO_DIR"
 fi
 
 cd "$REPO_DIR"
-rm -f 191.mp4 191.gif
 mkdir -p "$PREFIX/bin"
 cp rifevulkan "$PREFIX/bin/rifevulkan"
 chmod +x "$PREFIX/bin/rifevulkan"
@@ -38,6 +54,5 @@ while true; do
   esac
 done
 
-yes | termux-setup-storage
 clear
 echo -e "type '\e[31mrifevulkan\e[0m' for video frame interpolation"
