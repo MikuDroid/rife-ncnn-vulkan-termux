@@ -11,7 +11,7 @@ apt upgrade -y -o Dpkg::Options::="--force-confold"
 
 apt install -y git termux-api file ffmpeg libwebp mesa-vulkan-icd-swrast mesa-vulkan-icd-freedreno vulkan-loader
 
-git clone https://github.com/niyeee4/rife-ncnn-vulkan-termux
+git clone https://github.com/MikuDroid/rife-ncnn-vulkan-termux
 
 cd rife-ncnn-vulkan-termux
 
