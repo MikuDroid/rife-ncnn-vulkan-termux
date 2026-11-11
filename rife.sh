@@ -130,15 +130,29 @@ rm -rf frames tmp out
 mkdir -p frames tmp out
 
 echo "Extracting frames..."
-ffmpeg -i "$INPUT" -vsync 0 frames/%08d.png
-cp -r frames/* tmp/
+if ! ffmpeg -i "$INPUT" -fps_mode passthrough frames/%08d.png; then
+  echo "Frame extraction failed. Check that the input video is valid and FFmpeg can read it." >&2
+  exit 1
+fi
+if ! find frames -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
+  echo "No frames were extracted; stopping before interpolation." >&2
+  exit 1
+fi
+cp frames/*.png tmp/
 
 STEP=1
 while [ $STEP -lt $MULTI ]; do
   echo "Interpolating x2 (step $STEP -> $((STEP*2)))..."
   rm -rf out; mkdir out
-  ./rife-ncnn-vulkan -i tmp -o out -m "$MODEL"
-  rm -rf tmp; mkdir tmp; cp -r out/* tmp/
+  if ! ./rife-ncnn-vulkan -i tmp -o out -m "$MODEL"; then
+    echo "Interpolation failed." >&2
+    exit 1
+  fi
+  if ! find out -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
+    echo "RIFE produced no frames; stopping before encoding." >&2
+    exit 1
+  fi
+  rm -rf tmp; mkdir tmp; cp out/*.png tmp/
   STEP=$((STEP * 2))
 done
 mv tmp out
@@ -146,19 +160,25 @@ mv tmp out
 echo "Encoding video..."
 TMPVID="__tmpvid.${EXT}"
 
-ffmpeg -framerate "$NEWFPS" -pattern_type glob -i "out/*.png" \
+if ! ffmpeg -framerate "$NEWFPS" -pattern_type glob -i "out/*.png" \
   -c:v $VCODEC $QUALITY_OPT $PRESET_OPT $PIX_OPT $PROF_OPT \
   -r "$NEWFPS" -an \
-  "$TMPVID"
+  "$TMPVID"; then
+  echo "Video encoding failed." >&2
+  exit 1
+fi
 
 mkdir -p /sdcard/rifevulkan
 
 if [ -n "$HAS_AUDIO" ]; then
   echo "Muxing audio from original..."
-  ffmpeg -i "$TMPVID" -i "$INPUT" \
+  if ! ffmpeg -i "$TMPVID" -i "$INPUT" \
     -map 0:v:0 -map 1:a? \
     -c:v copy -c:a copy \
-    "$DEST"
+    "$DEST"; then
+    echo "Audio muxing failed." >&2
+    exit 1
+  fi
   rm -f "$TMPVID"
 else
   mv "$TMPVID" "$DEST"
