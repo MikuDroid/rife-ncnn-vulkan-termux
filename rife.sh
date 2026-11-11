@@ -1,137 +1,77 @@
 #!/bin/bash
 export LD_LIBRARY_PATH=/system/lib64:$LD_LIBRARY_PATH
 
+SUCCESS=0
+TMPFILE="__input.tmp"
+INPUT=""
+TMPVID="__tmpvid.mp4"
 cleanup() {
-  rm -f "$TMPFILE" "$INPUT" __tmpvid.*
+  rm -f "$TMPFILE" "$TMPVID"
+  [ "$SUCCESS" -eq 1 ] && [ -n "$INPUT" ] && rm -f "$INPUT"
   rm -rf frames tmp out
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
 
 echo "Pick video from system... (Ctrl+C to cancel)"
-TMPFILE="__input.tmp"
 rm -f "$TMPFILE"
 termux-storage-get "$TMPFILE" &
-
 while [ ! -f "$TMPFILE" ]; do sleep 1; done
 sleep 1
 
-EXT_RAW=$(file --mime-type -b "$TMPFILE" | cut -d'/' -f2)
-case "$EXT_RAW" in
-  mp4|mpeg4)      EXT="mp4";;
-  quicktime)      EXT="mov";;
-  x-matroska)     EXT="mkv";;
-  x-msvideo)      EXT="avi";;
-  x-ms-wmv)       EXT="wmv";;
-  webm)           EXT="webm";;
-  ogg)            EXT="ogv";;
-  x-flv)          EXT="flv";;
-  3gpp)           EXT="3gp";;
-  x-m4v)          EXT="m4v";;
-  x-ms-asf)       EXT="asf";;
-  *)              EXT="mp4";;
-esac
-
 while true; do
-  echo -n "Enter name (no extension): "
+  echo -n "Enter output name (no extension): "
   read NAME
-  if [ -f "${NAME}.${EXT}" ] || [ -f "/sdcard/rifevulkan/${NAME}_x"*".${EXT}" ] 2>/dev/null; then
-    echo -e "\e[33mWarning: '${NAME}' already exists, enter a different name\e[0m"
+  [[ -n "$NAME" ]] || { echo "Name cannot be empty." >&2; continue; }
+  INPUT="${NAME}.source"
+  DEST="/sdcard/rifevulkan/${NAME}_x2.mp4"
+  if [ -e "$INPUT" ] || [ -e "$DEST" ]; then
+    echo -e "\e[33mWarning: '${NAME}' already exists; choose a different name.\e[0m"
   else
     break
   fi
 done
-
-INPUT="${NAME}.${EXT}"
 mv "$TMPFILE" "$INPUT"
 
-echo -n "Interpolation (multi 2/4/6/8): "
-read MULTI
-[ -z "$MULTI" ] && MULTI=2
-
-CODEC=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$INPUT")
-PIXFMT=$(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of default=nw=1:nk=1 "$INPUT")
-PROFILE=$(ffprobe -v error -select_streams v:0 -show_entries stream=profile -of default=nw=1:nk=1 "$INPUT")
+# This workflow is intentionally 2x only: approximately 30 FPS in, 60 FPS out.
+FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=avg_frame_rate -of default=nw=1:nk=1 "$INPUT")
+[[ "$FPS" =~ ^([0-9]+)/([0-9]+)$ ]] || { echo "Could not determine a valid input frame rate: $FPS" >&2; exit 1; }
+NUM=${BASH_REMATCH[1]}
+DEN=${BASH_REMATCH[2]}
+(( DEN > 0 )) || { echo "Invalid input frame-rate denominator: $DEN" >&2; exit 1; }
+if ! awk -v n="$NUM" -v d="$DEN" 'BEGIN { f=n/d; exit !(f>=29 && f<=31) }'; then
+  echo "This script expects approximately 30 FPS input to produce approximately 60 FPS. Detected: $FPS" >&2
+  exit 1
+fi
+NEWFPS="$((NUM * 2))/$DEN"
 HAS_AUDIO=$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$INPUT")
-FPS=$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$INPUT")
-NUM=${FPS%/*}; DEN=${FPS#*/}
-NEWFPS="$((NUM * MULTI))/$DEN"
 
-case "$CODEC" in
-  h264)         VCODEC="libx264";    USE_CRF=1;;
-  hevc)         VCODEC="libx265";    USE_CRF=1;;
-  vp9)          VCODEC="libvpx-vp9"; USE_CRF=1;;
-  vp8)          VCODEC="libvpx";     USE_CRF=1;;
-  av1)          VCODEC="libaom-av1"; USE_CRF=1;;
-  rawvideo)     VCODEC="huffyuv";    USE_CRF=0;;
-  huffyuv)      VCODEC="huffyuv";    USE_CRF=0;;
-  ffv1)         VCODEC="ffv1";       USE_CRF=0;;
-  utvideo)      VCODEC="utvideo";    USE_CRF=0;;
-  prores)       VCODEC="prores_ks";  USE_CRF=0;;
-  dnxhd)        VCODEC="dnxhd";      USE_CRF=0;;
-  mpeg4)        VCODEC="mpeg4";      USE_CRF=0;;
-  mpeg2video)   VCODEC="mpeg2video"; USE_CRF=0;;
-  mpeg1video)   VCODEC="mpeg1video"; USE_CRF=0;;
-  mjpeg)        VCODEC="mjpeg";      USE_CRF=0;;
-  wmv1)         VCODEC="wmv1";       USE_CRF=0;;
-  wmv2)         VCODEC="wmv2";       USE_CRF=0;;
-  theora)       VCODEC="libtheora";  USE_CRF=0;;
-  flv1)         VCODEC="flv";        USE_CRF=0;;
-  h263)         VCODEC="h263";       USE_CRF=0;;
-  h263p)        VCODEC="h263p";      USE_CRF=0;;
-  msmpeg4v2)    VCODEC="msmpeg4v2";  USE_CRF=0;;
-  msmpeg4v3)    VCODEC="msmpeg4";    USE_CRF=0;;
-  cinepak)      VCODEC="cinepak";    USE_CRF=0;;
-  rv30|rv40)    VCODEC="libx264";    USE_CRF=1; echo -e "\e[33mWarning: RealVideo encoder not available, falling back to libx264\e[0m";;
-  svq3)         VCODEC="libx264";    USE_CRF=1; echo -e "\e[33mWarning: SVQ3 encoder not available, falling back to libx264\e[0m";;
-  indeo3)       VCODEC="libx264";    USE_CRF=1; echo -e "\e[33mWarning: Indeo3 encoder not available, falling back to libx264\e[0m";;
-  *)            VCODEC="libx264";    USE_CRF=1; echo -e "\e[33mWarning: Unknown codec '$CODEC', falling back to libx264\e[0m";;
+printf "\nInput: ~%s FPS; output: ~%s FPS (RIFE 2x)\n" "$FPS" "$NEWFPS"
+echo "Output is MP4. CRF controls quality/size, not a hard size limit."
+echo "1) H.265, CRF 24, medium — smaller output; requires HEVC playback support [default]"
+echo "2) H.264, CRF 22, slow — broader compatibility; may be larger"
+read -r -p "Encoder [1/2]: " ENCODE_MODE
+[ -z "$ENCODE_MODE" ] && ENCODE_MODE=1
+case "$ENCODE_MODE" in
+  1) VCODEC=libx265; CRF=24; PRESET=medium; EXTRA=(-tag:v hvc1) ;;
+  2) VCODEC=libx264; CRF=22; PRESET=slow; EXTRA=() ;;
+  *) echo "Invalid encoder choice." >&2; exit 1;;
 esac
-
-if [ $USE_CRF -eq 1 ]; then
-  echo -n "Crf (5-25) lower = higher quality (larger file size): "
-  read CRF
-  [ -z "$CRF" ] && CRF=18
-  case "$VCODEC" in
-    libx264|libx265)                 QUALITY_OPT="-crf $CRF"; PRESET_OPT="-preset medium";;
-    libvpx-vp9|libaom-av1|libvpx)   QUALITY_OPT="-crf $CRF -b:v 0"; PRESET_OPT="";;
-  esac
-else
-  echo -e "\e[33mWarning: '$CODEC' does not support CRF\e[0m"
-  case "$VCODEC" in
-    huffyuv|utvideo)       QUALITY_OPT=""; PRESET_OPT="";;
-    ffv1)                  QUALITY_OPT="-level 3 -slices 24 -slicecrc 1"; PRESET_OPT="";;
-    prores_ks)             QUALITY_OPT="-profile:v 4444 -q:v 1"; PRESET_OPT="";;
-    dnxhd)                 QUALITY_OPT="-b:v 36M"; PRESET_OPT="";;
-    libtheora)             QUALITY_OPT="-q:v 10"; PRESET_OPT="";;
-    *)                     QUALITY_OPT="-q:v 1"; PRESET_OPT="";;
-  esac
+read -r -p "CRF [$CRF] (higher = smaller file/lower quality): " CRF_INPUT || true
+[ -n "$CRF_INPUT" ] && CRF=$CRF_INPUT
+if ! [[ "$CRF" =~ ^[0-9]+$ ]] || (( CRF > 51 )); then
+  echo "CRF must be an integer from 0 to 51." >&2
+  exit 1
 fi
 
-PIX_OPT=""
-[ -n "$PIXFMT" ] && PIX_OPT="-pix_fmt $PIXFMT"
-[[ "$PIXFMT" == "bgra" || "$PIXFMT" == "bgrx" ]] && PIX_OPT="-pix_fmt rgb24"
-
-PROF_OPT=""
-[[ "$VCODEC" == "libx264" && "$PROFILE" == "High"    ]] && PROF_OPT="-profile:v high"
-[[ "$VCODEC" == "libx265" && "$PROFILE" == "Main 10" ]] && PROF_OPT="-profile:v main10"
-
-MODEL="rife-v4.6"
-DEST="/sdcard/rifevulkan/${NAME}_x${MULTI}.${EXT}"
-
-echo "FPS        : $FPS -> $NEWFPS"
-echo "Codec      : $CODEC -> $VCODEC"
-echo "PixelFormat: $PIXFMT"
-echo "Profile    : $PROFILE"
-echo "Audio      : ${HAS_AUDIO:-none}"
-echo "Output     : $DEST"
+printf "\nOutput: %s\nEncoder: %s -preset %s -crf %s\nAudio: %s\n" "$DEST" "$VCODEC" "$PRESET" "$CRF" "${HAS_AUDIO:-none}"
 
 rm -rf frames tmp out
 mkdir -p frames tmp out
 
-echo "Extracting frames..."
-if ! ffmpeg -i "$INPUT" -fps_mode passthrough frames/%08d.png; then
-  echo "Frame extraction failed. Check that the input video is valid and FFmpeg can read it." >&2
+echo "Extracting and normalizing source frames..."
+if ! ffmpeg -i "$INPUT" -vf "fps=$FPS" -fps_mode passthrough frames/%08d.png; then
+  echo "Frame extraction failed." >&2
   exit 1
 fi
 if ! find frames -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
@@ -140,42 +80,30 @@ if ! find frames -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; the
 fi
 cp frames/*.png tmp/
 
-STEP=1
-while [ $STEP -lt $MULTI ]; do
-  echo "Interpolating x2 (step $STEP -> $((STEP*2)))..."
-  rm -rf out; mkdir out
-  if ! ./rife-ncnn-vulkan -i tmp -o out -m "$MODEL"; then
-    echo "Interpolation failed." >&2
-    exit 1
-  fi
-  if ! find out -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
-    echo "RIFE produced no frames; stopping before encoding." >&2
-    exit 1
-  fi
-  rm -rf tmp; mkdir tmp; cp out/*.png tmp/
-  STEP=$((STEP * 2))
-done
-mv tmp out
+mkdir out
+echo "RIFE GPU interpolation: 2x..."
+if ! ./rife-ncnn-vulkan -i tmp -o out -m rife-v4.6; then
+  echo "Interpolation failed." >&2
+  exit 1
+fi
+if ! find out -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .; then
+  echo "RIFE produced no frames; stopping before encoding." >&2
+  exit 1
+fi
 
-echo "Encoding video..."
-TMPVID="__tmpvid.${EXT}"
-
+echo "Encoding MP4..."
 if ! ffmpeg -framerate "$NEWFPS" -pattern_type glob -i "out/*.png" \
-  -c:v $VCODEC $QUALITY_OPT $PRESET_OPT $PIX_OPT $PROF_OPT \
-  -r "$NEWFPS" -an \
-  "$TMPVID"; then
+  -c:v "$VCODEC" -preset "$PRESET" -crf "$CRF" "${EXTRA[@]}" \
+  -pix_fmt yuv420p -r "$NEWFPS" -an -movflags +faststart "$TMPVID"; then
   echo "Video encoding failed." >&2
   exit 1
 fi
 
 mkdir -p /sdcard/rifevulkan
-
 if [ -n "$HAS_AUDIO" ]; then
-  echo "Muxing audio from original..."
-  if ! ffmpeg -i "$TMPVID" -i "$INPUT" \
-    -map 0:v:0 -map 1:a? \
-    -c:v copy -c:a copy \
-    "$DEST"; then
+  echo "Muxing original audio into MP4..."
+  if ! ffmpeg -i "$TMPVID" -i "$INPUT" -map 0:v:0 -map 1:a:0 \
+    -c:v copy -c:a copy -movflags +faststart "$DEST"; then
     echo "Audio muxing failed." >&2
     exit 1
   fi
@@ -184,5 +112,6 @@ else
   mv "$TMPVID" "$DEST"
 fi
 
+SUCCESS=1
 termux-media-scan "$DEST"
 echo -e "\e[32mDone: $DEST\e[0m"
